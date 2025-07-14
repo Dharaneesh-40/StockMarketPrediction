@@ -7,3 +7,5 @@ pandas==1.5.3
 scikit-learn==1.1.2
 joblib==1.2.0
 chart.js==3.9.1
+gunicorn
+
