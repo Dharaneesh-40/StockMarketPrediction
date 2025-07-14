@@ -7,6 +7,7 @@ import joblib
 from flask import Flask, request, render_template, jsonify
 from datetime import datetime, timedelta
 import os
+
 app = Flask(__name__)
 
 # Define paths for model and scaler
@@ -14,9 +15,16 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 model_path = os.path.join(BASE_DIR, "model", "stock_lstm_model.keras")
 scaler_path = os.path.join(BASE_DIR, "model", "scaler.pkl")
 
-# Load the model and scaler
-model = load_model(model_path)
-scaler = joblib.load(scaler_path)
+# Helper functions to load model and scaler safely
+def load_trained_model():
+    if not os.path.exists(model_path):
+        raise FileNotFoundError("Model not found. Please train the model first.")
+    return load_model(model_path)
+
+def load_scaler():
+    if not os.path.exists(scaler_path):
+        raise FileNotFoundError("Scaler not found. Please train the model first.")
+    return joblib.load(scaler_path)
 
 @app.route('/')
 def home():
@@ -59,7 +67,7 @@ def train_model():
         if not symbol:
             return jsonify({"error": "Stock symbol is required"}), 400
 
-        # Fetch historical stock data (5 years of data)
+        # Fetch historical stock data (5 years)
         data = yf.Ticker(symbol).history(period="5y")
         if data.empty:
             return jsonify({"error": f"No data available for {symbol}. Please check the symbol and try again."}), 404
@@ -73,31 +81,31 @@ def train_model():
         # Prepare data for LSTM (sequence of 60 days as features)
         X, y = [], []
         for i in range(60, len(prices_scaled)):
-            X.append(prices_scaled[i-60:i, 0])  # Use the past 60 days as features
-            y.append(prices_scaled[i, 0])  # The next day's closing price as the label
+            X.append(prices_scaled[i-60:i, 0])
+            y.append(prices_scaled[i, 0])
 
         X, y = np.array(X), np.array(y)
-
-        # Reshaping X to be 3D [samples, time steps, features] for LSTM
         X = np.reshape(X, (X.shape[0], X.shape[1], 1))
 
         # Build LSTM Model
         model = Sequential()
         model.add(LSTM(units=50, return_sequences=True, input_shape=(X.shape[1], 1)))
         model.add(LSTM(units=50))
-        model.add(Dense(units=1))  # Output layer
+        model.add(Dense(units=1))
         model.compile(optimizer="adam", loss="mean_squared_error")
 
         # Train the model
         model.fit(X, y, epochs=20, batch_size=32)
 
-        # Save the trained model and scaler for future use
-        model.save(model_path)  # Save the LSTM model
-        joblib.dump(scaler, scaler_path)  # Save the scaler
+        # Save model and scaler
+        os.makedirs(os.path.dirname(model_path), exist_ok=True)
+        model.save(model_path)
+        joblib.dump(scaler, scaler_path)
 
-        return jsonify({"message": f"Training completed for symbol: {symbol}. Model and scaler saved successfully."}), 200
+        return jsonify({"message": f"Training completed for {symbol}. Model and scaler saved."}), 200
+
     except Exception as e:
-        return jsonify({"error": f"Error occurred during training: {e}"}), 500
+        return jsonify({"error": f"Error during training: {str(e)}"}), 500
 
 @app.route('/api/predict', methods=['GET'])
 def predict_stock():
@@ -111,6 +119,12 @@ def predict_stock():
     prices = hist['Close'].values.reshape(-1, 1)
     if len(prices) < 60:
         return jsonify({"error": "Insufficient data (less than 60 days) for prediction"}), 404
+
+    try:
+        model = load_trained_model()
+        scaler = load_scaler()
+    except FileNotFoundError as e:
+        return jsonify({"error": str(e)}), 400
 
     prices_scaled = scaler.transform(prices)
     last_60_days = prices_scaled[-60:].reshape((1, 60, 1))
