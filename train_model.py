@@ -9,8 +9,9 @@ import joblib
 app = Flask(__name__)
 
 # File paths to save model and scaler
-model_path = r"C:\Users\deepa\OneDrive\Desktop\StockMarketPredictionSystem\model\stock_lstm_model.keras"
-scaler_path = r"C:\Users\deepa\OneDrive\Desktop\StockMarketPredictionSystem\model\scaler.pkl"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+model_path = os.path.join(BASE_DIR, "model", "stock_lstm_model.keras")
+scaler_path = os.path.join(BASE_DIR, "model", "scaler.pkl")
 
 # Helper function to calculate model accuracy
 def calculate_accuracy(y_true, y_pred):
