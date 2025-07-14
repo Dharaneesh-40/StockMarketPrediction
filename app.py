@@ -6,12 +6,13 @@ from tensorflow.keras.layers import LSTM, Dense
 import joblib
 from flask import Flask, request, render_template, jsonify
 from datetime import datetime, timedelta
-
+import os
 app = Flask(__name__)
 
 # Define paths for model and scaler
-model_path = r"C:\Users\deepa\OneDrive\Desktop\StockMarketPredictionSystem\model\stock_lstm_model.keras"
-scaler_path = r"C:\Users\deepa\OneDrive\Desktop\StockMarketPredictionSystem\model\scaler.pkl"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+model_path = os.path.join(BASE_DIR, "model", "stock_lstm_model.keras")
+scaler_path = os.path.join(BASE_DIR, "model", "scaler.pkl")
 
 # Load the model and scaler
 model = load_model(model_path)
