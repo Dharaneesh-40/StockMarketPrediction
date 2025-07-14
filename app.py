@@ -12,19 +12,19 @@ app = Flask(__name__)
 
 # Define paths for model and scaler
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-model_path = os.path.join(BASE_DIR, "model", "stock_lstm_model.keras")
-scaler_path = os.path.join(BASE_DIR, "model", "scaler.pkl")
+model_dir = os.path.join(BASE_DIR, "model")
+model_path = os.path.join(model_dir, "stock_lstm_model.keras")
+scaler_path = os.path.join(model_dir, "scaler.pkl")
 
-# Helper functions to load model and scaler safely
-def load_trained_model():
-    if not os.path.exists(model_path):
-        raise FileNotFoundError("Model not found. Please train the model first.")
-    return load_model(model_path)
+# Ensure model directory exists
+os.makedirs(model_dir, exist_ok=True)
 
-def load_scaler():
-    if not os.path.exists(scaler_path):
-        raise FileNotFoundError("Scaler not found. Please train the model first.")
-    return joblib.load(scaler_path)
+# Load model and scaler if available
+model = None
+scaler = None
+if os.path.exists(model_path) and os.path.exists(scaler_path):
+    model = load_model(model_path)
+    scaler = joblib.load(scaler_path)
 
 @app.route('/')
 def home():
@@ -33,98 +33,96 @@ def home():
 @app.route('/api/stock', methods=['GET'])
 def get_stock_data():
     symbol = request.args.get('symbol')
-    stock = yf.Ticker(symbol)
-    hist = stock.history(period="3mo", interval="1d")
-    
-    if hist.empty:
-        return jsonify({"error": f"No data found for symbol: {symbol}"}), 404
+    try:
+        stock = yf.Ticker(symbol)
+        hist = stock.history(period="3mo", interval="1d")
 
-    info = stock.info
-    data = {
-        "name": info.get("shortName", "N/A"),
-        "open": float(hist['Open'].iloc[-1]) if len(hist) > 0 else "N/A",
-        "high": float(hist['High'].iloc[-1]) if len(hist) > 0 else "N/A",
-        "low": float(hist['Low'].iloc[-1]) if len(hist) > 0 else "N/A",
-        "close": float(hist['Close'].iloc[-1]) if len(hist) > 0 else "N/A",
-        "volume": int(hist['Volume'].iloc[-1]) if len(hist) > 0 else "N/A",
-        "today_low": float(hist['Low'].min()) if len(hist) > 0 else "N/A",
-        "today_high": float(hist['High'].max()) if len(hist) > 0 else "N/A",
-        "prev_close": float(hist['Close'].iloc[-2]) if len(hist) > 1 else float(hist['Close'].iloc[-1]),
-        "market_cap": info.get("marketCap", "N/A"),
-        "pe_ratio": info.get("trailingPE", "N/A"),
-        "dividend_yield": info.get("dividendYield", "N/A"),
-        "shares_outstanding": info.get("sharesOutstanding", "N/A"),
-        "dates": hist.index.strftime('%Y-%m-%d').tolist(),
-        "prices": hist['Close'].tolist()
-    }
+        if hist.empty:
+            return jsonify({"error": f"No data found for symbol: {symbol}. Possible network issue or invalid symbol."}), 404
 
-    return jsonify(data)
+        info = stock.info
+
+        data = {
+            "name": info.get("shortName", "N/A"),
+            "open": float(hist['Open'].iloc[-1]),
+            "high": float(hist['High'].iloc[-1]),
+            "low": float(hist['Low'].iloc[-1]),
+            "close": float(hist['Close'].iloc[-1]),
+            "volume": int(hist['Volume'].iloc[-1]),
+            "today_low": float(hist['Low'].min()),
+            "today_high": float(hist['High'].max()),
+            "prev_close": float(hist['Close'].iloc[-2]) if len(hist) > 1 else float(hist['Close'].iloc[-1]),
+            "market_cap": info.get("marketCap", "N/A"),
+            "pe_ratio": info.get("trailingPE", "N/A"),
+            "dividend_yield": info.get("dividendYield", "N/A"),
+            "shares_outstanding": info.get("sharesOutstanding", "N/A"),
+            "dates": hist.index.strftime('%Y-%m-%d').tolist(),
+            "prices": hist['Close'].tolist()
+        }
+
+        return jsonify(data)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/api/train', methods=['POST'])
 def train_model():
+    global model, scaler
+
     try:
         symbol = request.json.get('symbol')
         if not symbol:
             return jsonify({"error": "Stock symbol is required"}), 400
 
-        # Fetch historical stock data (5 years)
         data = yf.Ticker(symbol).history(period="5y")
         if data.empty:
-            return jsonify({"error": f"No data available for {symbol}. Please check the symbol and try again."}), 404
-        
+            return jsonify({"error": f"No data available for {symbol}. Possible network issue or invalid symbol."}), 404
+
         prices = data["Close"].values.reshape(-1, 1)
 
-        # Scaling the data (Normalization)
         scaler = MinMaxScaler(feature_range=(0, 1))
         prices_scaled = scaler.fit_transform(prices)
 
-        # Prepare data for LSTM (sequence of 60 days as features)
         X, y = [], []
         for i in range(60, len(prices_scaled)):
             X.append(prices_scaled[i-60:i, 0])
             y.append(prices_scaled[i, 0])
 
         X, y = np.array(X), np.array(y)
-        X = np.reshape(X, (X.shape[0], X.shape[1], 1))
+        X = X.reshape((X.shape[0], X.shape[1], 1))
 
-        # Build LSTM Model
         model = Sequential()
-        model.add(LSTM(units=50, return_sequences=True, input_shape=(X.shape[1], 1)))
-        model.add(LSTM(units=50))
-        model.add(Dense(units=1))
+        model.add(LSTM(50, return_sequences=True, input_shape=(X.shape[1], 1)))
+        model.add(LSTM(50))
+        model.add(Dense(1))
         model.compile(optimizer="adam", loss="mean_squared_error")
 
-        # Train the model
-        model.fit(X, y, epochs=20, batch_size=32)
+        model.fit(X, y, epochs=20, batch_size=32, verbose=1)
 
-        # Save model and scaler
-        os.makedirs(os.path.dirname(model_path), exist_ok=True)
         model.save(model_path)
         joblib.dump(scaler, scaler_path)
 
-        return jsonify({"message": f"Training completed for {symbol}. Model and scaler saved."}), 200
+        return jsonify({"message": f"Model trained and saved for {symbol}."}), 200
 
     except Exception as e:
-        return jsonify({"error": f"Error during training: {str(e)}"}), 500
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/api/predict', methods=['GET'])
 def predict_stock():
+    global model, scaler
+
+    if model is None or scaler is None:
+        return jsonify({"error": "Model is not trained yet. Please call /api/train first."}), 400
+
     symbol = request.args.get('symbol')
     stock = yf.Ticker(symbol)
     hist = stock.history(period="3mo", interval="1d")
-    
+
     if hist.empty:
-        return jsonify({"error": f"No historical data found for symbol: {symbol}"}), 404
+        return jsonify({"error": f"No historical data found for symbol: {symbol}. Possible network issue or invalid symbol."}), 404
 
     prices = hist['Close'].values.reshape(-1, 1)
     if len(prices) < 60:
         return jsonify({"error": "Insufficient data (less than 60 days) for prediction"}), 404
-
-    try:
-        model = load_trained_model()
-        scaler = load_scaler()
-    except FileNotFoundError as e:
-        return jsonify({"error": str(e)}), 400
 
     prices_scaled = scaler.transform(prices)
     last_60_days = prices_scaled[-60:].reshape((1, 60, 1))
@@ -143,5 +141,11 @@ def predict_stock():
 
     return jsonify(dict(zip(dates, predicted_prices.tolist())))
 
+# Health check for Render
+@app.route('/health', methods=['GET'])
+def health():
+    return jsonify({"status": "ok"}), 200
+
 if __name__ == '__main__':
-    app.run(debug=True)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port, debug=True)
