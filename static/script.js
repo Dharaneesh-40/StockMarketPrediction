@@ -7,10 +7,9 @@ async function fetchStockData() {
         const response = await fetch(`/api/stock?symbol=${symbol}`);
         
         if (!response.ok) {
-            // Check if response is not OK (status code not in the range 200-299)
             const errorData = await response.json();
             alert(errorData.error || "An error occurred while fetching the stock data.");
-            return; // Exit the function after showing the error
+            return;
         }
 
         const data = await response.json();
@@ -23,21 +22,16 @@ async function fetchStockData() {
     }
 }
 
-
 async function trainStockModel() {
     const symbol = document.getElementById("stock-symbol").value;
-
-    // Show a loading message while training
     const statusDiv = document.getElementById('training-status');
     statusDiv.innerHTML = "Training the model... Please wait.";
 
     try {
         const response = await fetch('/api/train', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ symbol }) // Send stock symbol
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ symbol })
         });
 
         const result = await response.json();
@@ -46,7 +40,7 @@ async function trainStockModel() {
             alert(result.message);
         } else {
             statusDiv.innerHTML = "Error occurred during training!";
-            alert(result.error || "Model training failed."); // Error
+            alert(result.error || "Model training failed.");
         }
     } catch (error) {
         console.error("Error training model:", error);
@@ -93,10 +87,7 @@ function plotActualGraph(data) {
         options: {
             responsive: true,
             plugins: {
-                title: {
-                    display: true,
-                    text: 'Stock Price Data'
-                }
+                title: { display: true, text: 'Stock Price Data' }
             }
         }
     });
@@ -106,7 +97,6 @@ async function fetchPredictionData(symbol) {
     try {
         const response = await fetch(`/api/predict?symbol=${symbol}`);
         const data = await response.json();
-
         plotPredictionGraph(data);
     } catch (error) {
         console.error("Error fetching prediction data:", error);
@@ -133,10 +123,7 @@ function plotPredictionGraph(predictedData) {
         options: {
             responsive: true,
             plugins: {
-                title: {
-                    display: true,
-                    text: 'Predicted Stock Prices (Next 30 Days)'
-                }
+                title: { display: true, text: 'Predicted Stock Prices (Next 30 Days)' }
             }
         }
     });
